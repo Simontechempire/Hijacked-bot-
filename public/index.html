@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Lord Dev - WhatsApp Pair</title>
+    <style>
+        body { background: #0a0a0a; color: #00ff00; font-family: 'Courier New', monospace; text-align: center; padding: 50px; }
+        input { padding: 10px; width: 250px; margin: 10px; border: 1px solid #00ff00; background: #000; color: #00ff00; }
+        button { padding: 10px 20px; background: #00ff00; color: #000; border: none; cursor: pointer; font-weight: bold; }
+        #code-display { font-size: 30px; margin: 20px; color: yellow; }
+    </style>
+</head>
+<body>
+    <h1>Lord Developer - Session Hijacker</h1>
+    <div id="setup">
+        <input type="text" id="phone" placeholder="Enter Phone Number (e.g. 234...)"><br>
+        <button onclick="generateCode()">GENERATE 8-DIGIT CODE</button>
+    </div>
+    <div id="code-display"></div>
+
+    <script>
+        async function generateCode() {
+            const phone = document.getElementById('phone').value;
+            const res = await fetch(`/generate-code?phone=${phone}`);
+            const data = await res.json();
+            if(data.code) {
+                document.getElementById('code-display').innerText = "YOUR CODE: " + data.code;
+            } else {
+                alert("Error generating code");
+            }
+        }
+    </script>
+</body>
+</html>
