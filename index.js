@@ -1,4 +1,3 @@
-
 const {
     default: makeWASocket,
     useMultiFileAuthState
@@ -6,8 +5,10 @@ const {
 
 const express = require("express");
 const pino = require("pino");
+const fs = require("fs");
+const path = require("path");
+
 const config = require("./config");
-const hijackedPlugin = require("./plugins/hijacked");
 
 const app = express();
 app.use(express.json());
@@ -17,6 +18,54 @@ let authState = null;
 let initPromise = null;
 let pairingBusy = false;
 
+const plugins = new Map();
+const PLUGIN_DIR = path.join(__dirname, "plugins");
+
+// Load plugins
+function loadPlugins() {
+    if (!fs.existsSync(PLUGIN_DIR)) {
+        fs.mkdirSync(PLUGIN_DIR, { recursive: true });
+    }
+
+    plugins.clear();
+
+    const files = fs.readdirSync(PLUGIN_DIR);
+
+    for (const file of files) {
+        if (!file.endsWith(".js")) continue;
+
+        const name = path.basename(file, ".js").toLowerCase();
+
+        // Keep destructive group-hijacking commands disabled.
+        if (name === "hijacked") {
+            console.log(`Plugin enable: ${name}`);
+            continue;
+        }
+
+        const filePath = path.join(PLUGIN_DIR, file);
+
+        try {
+            delete require.cache[require.resolve(filePath)];
+
+            const plugin = require(filePath);
+
+            if (typeof plugin !== "function") {
+                console.log(`Invalid plugin: ${file}`);
+                continue;
+            }
+
+            plugins.set(name, plugin);
+            console.log(`Loaded plugin: ${name}`);
+
+        } catch (error) {
+            console.error(`Plugin loading error (${file}):`, error.message);
+        }
+    }
+
+    console.log(`Total plugins loaded: ${plugins.size}`);
+}
+
+// WhatsApp connection
 async function startWhatsApp() {
     if (initPromise) return initPromise;
 
@@ -50,16 +99,47 @@ async function startWhatsApp() {
             }
         });
 
+        // Incoming messages and plugin commands
         sock.ev.on("messages.upsert", async ({ messages }) => {
             for (const m of messages) {
-                if (!m.message || m.key.fromMe) continue;
+                try {
+                    if (!m.message || m.key.fromMe) continue;
 
-                const text =
-                    m.message.conversation ||
-                    m.message.extendedTextMessage?.text;
+                    const chat = m.key.remoteJid;
+                    if (!chat) continue;
 
-                if (text === ".hijacked") {
-                    await hijackedPlugin(sock, m, config);
+                    const message =
+                        m.message.conversation ||
+                        m.message.extendedTextMessage?.text ||
+                        m.message.imageMessage?.caption ||
+                        m.message.videoMessage?.caption ||
+                        "";
+
+                    const prefix = config.prefix || config.PREFIX || ".";
+
+                    if (!message.startsWith(prefix)) continue;
+
+                    const args = message.trim().split(/\s+/);
+                    const command = args[0]
+                        .slice(prefix.length)
+                        .toLowerCase();
+
+                    const plugin = plugins.get(command);
+
+                    if (!plugin) continue;
+
+                    // Add useful message properties
+                    m.chat = chat;
+                    m.sender = m.key.participant || chat;
+                    m.text = message;
+                    m.args = args.slice(1);
+                    m.command = command;
+                    m.isGroup = chat.endsWith("@g.us");
+
+                    await plugin(sock, m, config);
+
+                } catch (error) {
+                    console.error("Message/Plugin error:", error);
                 }
             }
         });
@@ -123,9 +203,13 @@ app.get("/generate-code", async (req, res) => {
     }
 });
 
-app.use(express.static("public"));
+// Website
+app.use(express.static(path.join(__dirname, "public")));
 
+// Start server
 const PORT = process.env.PORT || 3000;
+
+loadPlugins();
 
 app.listen(PORT, () => {
     console.log(`Lord Developer Server running on port ${PORT}`);
