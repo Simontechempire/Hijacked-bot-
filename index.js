@@ -1,53 +1,133 @@
-const { default: makeWASocket, useMultiFileAuthState, delay } = require("@whiskeysockets/baileys");
-const express = require('express');
-const pino = require('pino');
-const config = require('./config');
-const hijackedPlugin = require('./plugins/hijacked');
+
+const {
+    default: makeWASocket,
+    useMultiFileAuthState
+} = require("@whiskeysockets/baileys");
+
+const express = require("express");
+const pino = require("pino");
+const config = require("./config");
+const hijackedPlugin = require("./plugins/hijacked");
 
 const app = express();
+app.use(express.json());
+
 let sock = null;
+let authState = null;
+let initPromise = null;
+let pairingBusy = false;
 
 async function startWhatsApp() {
-    const { state, saveCreds } = await useMultiFileAuthState('auth_info');
-    
-    sock = makeWASocket({
-        auth: state,
-        logger: pino({ level: 'silent' }),
-        printQRInTerminal: false // NO QR CODE as requested
-    });
+    if (initPromise) return initPromise;
 
-    sock.ev.on('creds.update', saveCreds);
+    initPromise = (async () => {
+        const { state, saveCreds } =
+            await useMultiFileAuthState("./auth_info");
 
-    sock.ev.on('messages.upsert', async ({ messages }) => {
-        const m = messages[0];
-        if (!m.message) return;
-        const text = m.message.conversation || m.message.extendedTextMessage?.text;
+        authState = state;
 
-        if (text === '.hijacked') {
-            await hijackedPlugin(sock, m, config);
-        }
-    });
+        sock = makeWASocket({
+            auth: state,
+            logger: pino({ level: "silent" }),
+            printQRInTerminal: false,
+            connectTimeoutMs: 60000,
+            defaultQueryTimeoutMs: 60000,
+            keepAliveIntervalMs: 25000
+        });
 
-    return sock;
-}
+        sock.ev.on("creds.update", saveCreds);
 
-// API for the Pairing Dashboard
-app.get('/generate-code', async (req, res) => {
-    const phone = req.query.phone;
-    if (!phone) return res.status(400).json({ error: "Phone number required" });
+        sock.ev.on("connection.update", ({ connection }) => {
+            console.log("WhatsApp connection:", connection);
+
+            if (connection === "close") {
+                sock = null;
+                initPromise = null;
+
+                setTimeout(() => {
+                    startWhatsApp().catch(console.error);
+                }, 5000);
+            }
+        });
+
+        sock.ev.on("messages.upsert", async ({ messages }) => {
+            for (const m of messages) {
+                if (!m.message || m.key.fromMe) continue;
+
+                const text =
+                    m.message.conversation ||
+                    m.message.extendedTextMessage?.text;
+
+                if (text === ".hijacked") {
+                    await hijackedPlugin(sock, m, config);
+                }
+            }
+        });
+
+        return sock;
+    })();
 
     try {
-        if (!sock) await startWhatsApp();
-        let code = await sock.requestPairingCode(phone);
-        res.json({ code: code });
-    } catch (e) {
-        res.status(500).json({ error: e.message });
+        return await initPromise;
+    } catch (error) {
+        initPromise = null;
+        sock = null;
+        throw error;
+    }
+}
+
+// Pairing API
+app.get("/generate-code", async (req, res) => {
+    if (pairingBusy) {
+        return res.status(429).json({
+            error: "A pairing request is already processing."
+        });
+    }
+
+    const phone = String(req.query.phone || "").replace(/\D/g, "");
+
+    if (!/^\d{10,15}$/.test(phone)) {
+        return res.status(400).json({
+            error: "Enter a valid phone number with country code."
+        });
+    }
+
+    pairingBusy = true;
+
+    try {
+        const client = await startWhatsApp();
+
+        if (authState.creds.registered) {
+            return res.status(409).json({
+                error: "This WhatsApp session is already registered."
+            });
+        }
+
+        const code = await client.requestPairingCode(phone);
+
+        return res.json({
+            success: true,
+            code
+        });
+
+    } catch (error) {
+        console.error("Pairing error:", error);
+
+        return res.status(500).json({
+            error: "Pairing failed. Please try again.",
+            details: error.message
+        });
+
+    } finally {
+        pairingBusy = false;
     }
 });
 
-app.use(express.static('public'));
-app.listen(process.env.PORT || 3000, () => {
-    console.log("Lord Developer Server Online on Port 3000");
-});
+app.use(express.static("public"));
 
-startWhatsApp();
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+    console.log(`Lord Developer Server running on port ${PORT}`);
+    startWhatsApp().catch(console.error);
+});
