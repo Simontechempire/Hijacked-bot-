@@ -1,33 +1,141 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Lord Dev - WhatsApp Pair</title>
-    <style>
-        body { background: #0a0a0a; color: #00ff00; font-family: 'Courier New', monospace; text-align: center; padding: 50px; }
-        input { padding: 10px; width: 250px; margin: 10px; border: 1px solid #00ff00; background: #000; color: #00ff00; }
-        button { padding: 10px 20px; background: #00ff00; color: #000; border: none; cursor: pointer; font-weight: bold; }
-        #code-display { font-size: 30px; margin: 20px; color: yellow; }
-    </style>
-</head>
-<body>
-    <h1>Lord Developer - Session Hijacker</h1>
-    <div id="setup">
-        <input type="text" id="phone" placeholder="Enter Phone Number (e.g. 234...)"><br>
-        <button onclick="generateCode()">GENERATE 8-DIGIT CODE</button>
-    </div>
-    <div id="code-display"></div>
 
-    <script>
-        async function generateCode() {
-            const phone = document.getElementById('phone').value;
-            const res = await fetch(`/generate-code?phone=${phone}`);
-            const data = await res.json();
-            if(data.code) {
-                document.getElementById('code-display').innerText = "YOUR CODE: " + data.code;
-            } else {
-                alert("Error generating code");
-            }
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lord Developer - WhatsApp Pair</title>
+
+<style>
+* { box-sizing: border-box; }
+
+body {
+    background: #080808;
+    color: #00ff00;
+    font-family: monospace;
+    text-align: center;
+    padding: 40px 15px;
+}
+
+.container {
+    max-width: 400px;
+    margin: 60px auto;
+    padding: 25px;
+    border: 1px solid #00ff00;
+    border-radius: 12px;
+    background: #101010;
+}
+
+h1 { font-size: 23px; }
+
+input {
+    width: 100%;
+    padding: 14px;
+    margin: 20px 0;
+    background: #000;
+    color: #00ff00;
+    border: 1px solid #00ff00;
+    border-radius: 5px;
+}
+
+button {
+    width: 100%;
+    padding: 14px;
+    background: #00ff00;
+    color: #000;
+    border: none;
+    font-weight: bold;
+    cursor: pointer;
+    border-radius: 5px;
+}
+
+button:disabled {
+    opacity: 0.5;
+    cursor: wait;
+}
+
+#status {
+    margin-top: 20px;
+    overflow-wrap: anywhere;
+}
+
+#error { color: #ff4444; }
+
+#code-display {
+    font-size: 25px;
+    color: yellow;
+    margin-top: 20px;
+}
+</style>
+</head>
+
+<body>
+<div class="container">
+
+<h1>LORD DEVELOPER</h1>
+<p>WHATSAPP PAIRING DASHBOARD</p>
+
+<input
+    type="tel"
+    id="phone"
+    placeholder="2348012345678"
+    autocomplete="tel"
+>
+
+<button id="generate" onclick="generateCode()">
+GENERATE PAIRING CODE
+</button>
+
+<div id="status"></div>
+<div id="code-display"></div>
+<div id="error"></div>
+
+</div>
+
+<script>
+async function generateCode() {
+    const phone = document.getElementById("phone").value.trim();
+    const button = document.getElementById("generate");
+    const status = document.getElementById("status");
+    const codeDisplay = document.getElementById("code-display");
+    const error = document.getElementById("error");
+
+    codeDisplay.textContent = "";
+    error.textContent = "";
+
+    if (!/^\d{10,15}$/.test(phone)) {
+        error.textContent = "Enter a valid number with country code.";
+        return;
+    }
+
+    button.disabled = true;
+    button.textContent = "PLEASE WAIT...";
+    status.textContent = "Connecting to server...";
+
+    try {
+        const response = await fetch(
+            `/generate-code?phone=${encodeURIComponent(phone)}`
+        );
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error || "Pairing failed.");
         }
-    </script>
+
+        codeDisplay.textContent = "YOUR CODE: " + data.code;
+        status.textContent = "Request completed.";
+
+    } catch (err) {
+        error.textContent = err.message;
+        status.textContent = "Request unsuccessful.";
+
+    } finally {
+        button.disabled = false;
+        button.textContent = "GENERATE PAIRING CODE";
+    }
+}
+</script>
+
 </body>
 </html>
